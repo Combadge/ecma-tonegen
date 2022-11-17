@@ -51,6 +51,9 @@ function generateCycle(cycle, volume, shape) {
     tmp = generator(i, cycle, volume);
     data[i] = Math.round(tmp);
   }
+
+  if (volume === 0) { data.fill(0); }
+
   return data;
 }
 
@@ -59,12 +62,22 @@ function generateWaveForm(opts) {
   var freq = opts.freq || 440;
   var rate = opts.rate || 44100
   var lengthInSecs = opts.lengthInSecs || 2.0;
-  var volume = opts.volume || 30;
+  var lengthPrecision = opts.lengthPrecision || 'round';
+  var volume = typeof opts.volume == 'number' ? opts.volume : 30;
   var shape = opts.shape || 'sine';
 
   var cycle = Math.floor(rate/freq);
-  var samplesLeft = lengthInSecs * rate;
+  var samplesLeft = Math.floor(lengthInSecs * rate);
   var cycles = samplesLeft/cycle;
+
+  switch (lengthPrecision) {
+    case 'clipexact':
+      cycles = Math.ceil(cycles);
+    case 'padexact':
+      cycles = Math.floor(cycles);
+    default:
+      cycles = Math.round(cycles);
+  };
 
   const ret = new Int16Array(samplesLeft);
   let retIndex = 0;
@@ -76,6 +89,13 @@ function generateWaveForm(opts) {
     });
   }
 
+  switch (lengthPrecision) {
+    case 'padexact':
+      ret = ret.concat(new Array(samplesLeft - ret.length).fill(0));
+    case 'clipexact':
+      ret.splice(samplesLeft);
+  }
+  
   return ret;
 };
 
