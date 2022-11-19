@@ -316,4 +316,13 @@ class Silence {
     }
 }
 
+/**
+ * Create a polytonal chirp
+ */
+class Chirp {
+    constructor () {
+        
+    }
+}
+
 export { Tones, Generators, FixedPitch, LinearBend, Silence };
