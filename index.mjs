@@ -146,10 +146,15 @@ class FixedPitch {
      */
     approxTone(offset = 0) {
         var oscillation = this.oscillation(offset);
+        if (oscillation.length > 1000) {
+            var appender = function () {oscillation.forEach(function (sample) {rawWaveForm.push(sample)})};
+        } else {
+            var appender = function () {rawWaveForm.push(...oscillation)};
+        }
 
         var rawWaveForm = [];
         while (rawWaveForm.length < this.targetSampleCount) {
-            rawWaveForm.push(...oscillation);
+            appender();
         }
 
         return rawWaveForm;
@@ -225,16 +230,14 @@ class LinearBend {
         if (this.startFrequency < this.endFrequency) {
             for (var frequency = this.startFrequency; frequency < this.endFrequency; frequency++ ) {
                 var wavelength = this.oscillation(frequency);
-                basicScale.push(...wavelength);
+                wavelength.forEach(function (sample) {basicScale.push(sample)});
             }
         } else {
             for (var frequency = this.startFrequency; frequency > this.endFrequency; frequency-- ) {
                 var wavelength = this.oscillation(frequency);
-                basicScale.push(...wavelength);
+                wavelength.forEach(function (sample) {basicScale.push(sample)});
             }
         }
-
-        console.log(this.targetSampleCount, basicScale.length)
         
         return sizedArray(basicScale, this.bitDepth)
     }
@@ -247,13 +250,13 @@ class LinearBend {
             for (var frequency = this.startFrequency; frequency < this.endFrequency; frequency++ ) {
                 var wavelength = this.oscillation(frequency);
                 oscillations.push(wavelength);
-                samples.push(...wavelength);
+                wavelength.forEach(function (sample) {samples.push(sample)});
             }
         } else {
             for (var frequency = this.startFrequency; frequency > this.endFrequency; frequency-- ) {
                 var wavelength = this.oscillation(frequency);
                 oscillations.push(wavelength);
-                samples.push(...wavelength);
+                wavelength.forEach(function (sample) {samples.push(sample)});
             }
         }
         var count = Math.ceil(this.targetSampleCount/samples.length)
@@ -262,13 +265,10 @@ class LinearBend {
         oscillations.forEach(function (oscillation) {
             var counter = 0;
             while (counter < count) {
-                timedSamples.push(...oscillation)
+                oscillation.forEach(function (sample) {timedSamples.push(sample)});
                 counter++
             }
         });
-        console.log(oscillations.length, timedSamples.length)
-
-        console.log(count)
         
         return sizedArray(timedSamples, this.bitDepth)
     }
