@@ -1,7 +1,7 @@
 {
   "name": "@combadge/ecma-tonegenerator",
   "description": "Generates a tone as raw PCM WAV data, so you can do operations on it",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "license": "Apache-2.0",
   "author": {
     "name": "Karl Westin",
