@@ -88,6 +88,69 @@ function sizedArray (indices, depth) {
     }
 }
 
+/**
+ * An oscillation of a defined frequency, sample rate, bit depth, volume and waveform
+ */
+class Oscillation {
+    constructor ({frequency = Tones["E♭6"],
+                  sampleRate = 16000,
+                  bitDepth = 16,
+                  volume = 1,
+                  generator = Generators.sine} = {}) {
+
+        this.frequency = frequency;
+        this.sampleRate = sampleRate;
+        this.bitDepth = bitDepth;
+        this._volume = Math.min(Math.max(volume, 0), 1);
+        this.generator = generator;
+    
+        this.oscillationLength = sampleRate / frequency;
+        this.approxOscillationLength = Math.floor(this.oscillationLength);
+    }
+
+    toString() {
+        return `A ${this.generator.name} oscillator of frequency ${this.frequency}Hz, at ${this.bitDepth}/${this.sampleRate/1000}KHz`
+    }
+
+    /**
+     * Generate a single approximate oscillation at the desired sample rate, bit depth and frequency
+     */
+    approximate () {
+        var volume = this.volume;
+
+        var indices = [];
+        for (var index = 0; indices.length < this.approxOscillationLength; index++) {
+            indices.push(index);
+        }
+        return indices.map(index => Math.round(this.generator(index, this.oscillationLength, volume)));
+    }
+
+    /**
+     * Get a tonally accurate oscillation or sequence of oscillations
+     */
+    accurate () {
+        if (this.approxOscillationLength == this.oscillationLength) {
+            return this.approximate();
+        }
+
+        var volume = this.volume;
+        var decimalPlaces =  this.oscillationLength.toString().split(".")[1].length || 0;
+        var oscillationCount =  10 ^ decimalPlaces;
+        var sampleCount = oscillationCount * this.oscillationLength;
+
+        var indices = [];
+        for (var index = 0; indices.length < sampleCount; index++) {
+            indices.push(index);
+        }
+
+        return indices.map(index => Math.round(this.generator(index, this.oscillationLength, volume)));
+    }
+
+    get volume () {
+        var depthMax = Math.pow(2,this.bitDepth)/2;
+        return depthMax * this._volume;
+    }
+}
 
 /**
  * We'll do duration in milliseconds and volume as a fraction of 1.
@@ -97,46 +160,53 @@ class FixedPitch {
     constructor ({frequency = Tones["E♭6"],
                  sampleRate = 16000,
                  bitDepth = 16,
-                 duration = 200,
                  volume = 1,
-                 generator = Generators.sine,
-                 exactDuration = false,
-                 exactTone = false} = {}) {
+                 generator = Generators.sine} = {}) {
 
+        this.oscillation = new Oscillation({frequency: frequency,
+                                            sampleRate: sampleRate,
+                                            bitDepth: bitDepth,
+                                            volume: volume,
+                                            generator: generator})
         this.frequency = frequency;
         this.sampleRate = sampleRate;
         this.bitDepth = bitDepth;
-        this.duration = duration;
-        this._volume = Math.min(Math.max(volume, 0), 1);
         this.generator = generator;
-        this.exactDuration = exactDuration;
-        this.exactTone = exactTone;
-
-        this.oscillationLength = sampleRate / frequency;
-        this.targetSampleCount = Math.floor(this.duration / 1000 * this.sampleRate);
     }
 
     toString () {
-        return `A waveform containing ${this.duration}ms of ${this.generator.name} of frequency ${this.frequency}Hz, at ${this.bitDepth}/${this.sampleRate/1000}KHz`;
+        return `A waveform containing ${this.generator.name} of frequency ${this.frequency}Hz, at ${this.bitDepth}/${this.sampleRate/1000}KHz`;
     }
 
-    get volume () {
-        var depthMax = Math.pow(2,this.bitDepth)/2;
-        return depthMax * this._volume;
-    }
+    accurate ({duration = undefined,
+              samples = undefined,
+              offset = 0} = {}) {
 
-    tone (offset = 0) {
-        if (this.exactTone) {
-            var tone = this.preciseTone(offset);
-        } else {
-            var tone = this.approxTone(offset);
+        if (samples && duration) {
+            throw "Only one size variable may be set.";
+        } else if (duration) {
+            samples = (duration * this.sampleRate) / 1000;
+        }
+        samples = Math.floor(samples);
+
+        var oscillations = this.oscillation.accurate();
+        if (offset) {
+            var firstHalf = oscillations.slice(0, offset);
+            var secondHalf = oscillations.slice(offset);
+            oscillations = new Array(oscillations.length);
+            oscillations.set(secondHalf, 0);
+            oscillations.set(firstHalf, secondHalf.length);
         }
 
-        if (this.exactDuration) {
-            return sizedArray(tone.slice(0, this.targetSampleCount), this.bitDepth);
+        var tone = []
+        while (tone.length < samples) {
+            oscillations.forEach(function (sample) {tone.push(sample)})
         }
 
-        return sizedArray(tone, this.bitDepth);
+        if (duration) {
+            return sizedArray(tone, this.bitDepth);
+        }
+        return sizedArray(tone.slice(0, samples), this.bitDepth);
     }
 
     /**
@@ -144,45 +214,44 @@ class FixedPitch {
      * 
      * Faster, but frequency will be slightly off.
      */
-    approxTone(offset = 0) {
-        var oscillation = this.oscillation(offset);
-        if (oscillation.length > 1000) {
-            var appender = function () {oscillation.forEach(function (sample) {rawWaveForm.push(sample)})};
-        } else {
-            var appender = function () {rawWaveForm.push(...oscillation)};
+    approximate ({duration = undefined,
+                  samples = undefined,
+                  offset = 0} = {}) {
+
+        if (samples && duration) {
+            throw "Only one size variable may be set.";
+        } else if (duration) {
+            samples = (duration * this.sampleRate) / 1000;
+        }
+        samples = Math.floor(samples);
+
+        var oscillation = this.oscillation.approximate();
+        if (offset) {
+            var firstHalf = oscillation.slice(0, offset);
+            var secondHalf = oscillation.slice(offset);
+            oscillation = new Array(oscillation.length);
+            oscillation.set(secondHalf, 0);
+            oscillation.set(firstHalf, secondHalf.length);
         }
 
-        var rawWaveForm = [];
-        while (rawWaveForm.length < this.targetSampleCount) {
+        if (oscillation.length > 1000) {
+            var appender = function () {oscillation.forEach(function (sample) {tone.push(sample)})};
+        } else {
+            var appender = function () {tone.push(...oscillation)};
+        }
+
+        var tone = [];
+        while (tone.length < samples) {
             appender();
         }
 
-        return rawWaveForm;
-    }
-
-    /**
-     * WIP.
-     */
-    preciseTone(offset = 0) {
-        throw "Sorry, Precise tone generator not yet implemented.";
-    }
-
-    /**
-     * Generate a single oscillation at the desired sample rate, bit depth and frequency
-     */
-    oscillation(offset = 0) {
-        var approxOscillationLength = Math.floor(this.oscillationLength);
-        var volume = this.volume;
-
-        var indices = [];
-        for (var index = offset; indices.length < approxOscillationLength; index++) {
-            if (index > approxOscillationLength ) {
-                index = 0;
-            }
-            indices.push(index);
+        if (duration) {
+            return sizedArray(tone, this.bitDepth);
         }
-        return indices.map(index => Math.round(this.generator(index, approxOscillationLength, volume)));
+
+        return sizedArray(tone.slice(0, samples), this.bitDepth);
     }
+
 }
 
 /**
@@ -193,74 +262,59 @@ class LinearBend {
                   endFrequency = Tones["D6"],
                   sampleRate = 16000,
                   bitDepth = 16,
-                  duration = 200,
                   volume = 1,
-                  generator = Generators.sine,
-                  exactDuration = false,
-                  exactTone = false} = {}) {
+                  generator = Generators.sine} = {}) {
 
         this.startFrequency = startFrequency;
         this.endFrequency = endFrequency;
         this.sampleRate = sampleRate;
         this.bitDepth = bitDepth;
-        this.duration = duration;
-        this._volume = Math.min(Math.max(volume, 0), 1);
+        this.volume = Math.min(Math.max(volume, 0), 1);
         this.generator = generator;
-        this.exactDuration = exactDuration;
-        this.exactTone = exactTone;
-        this.targetSampleCount = Math.floor(this.duration / 1000 * this.sampleRate);
     }
 
     toString () {
-        return `A waveform containing ${this.duration}ms of ${this.generator.name} bending from ${this.startFrequency}Hz to ${this.endFrequency}Hz, at ${this.bitDepth}/${this.sampleRate/1000}KHz`;
+        return `A waveform containing ${this.generator.name} bending from ${this.startFrequency}Hz to ${this.endFrequency}Hz, at ${this.bitDepth}/${this.sampleRate/1000}KHz`;
     }
 
-    get volume () {
-        var depthMax = Math.pow(2,this.bitDepth)/2;
-        return depthMax * this._volume;
-    }
+    approximate ({duration = undefined,
+                  samples = undefined} = {}) {
 
-    /**
-     * Cheap function to make a bend between notes, but currently very unsmooth at low samplerate and duration is ignored
-     * Sample rate issue is artifact of lazy approximaton in oscillation
-     */
-    fastScale () {
-        var basicScale = [];
-
-        if (this.startFrequency < this.endFrequency) {
-            for (var frequency = this.startFrequency; frequency < this.endFrequency; frequency++ ) {
-                var wavelength = this.oscillation(frequency);
-                wavelength.forEach(function (sample) {basicScale.push(sample)});
-            }
-        } else {
-            for (var frequency = this.startFrequency; frequency > this.endFrequency; frequency-- ) {
-                var wavelength = this.oscillation(frequency);
-                wavelength.forEach(function (sample) {basicScale.push(sample)});
-            }
+        if (samples && duration) {
+            throw "Only one size variable may be set.";
+        } else if (duration) {
+            samples = (duration * this.sampleRate) / 1000;
         }
-        
-        return sizedArray(basicScale, this.bitDepth)
-    }
+        samples = Math.floor(samples);
 
-    timedScale () {
         var oscillations = [];
-        var samples = [];
+        var combinedoscillations = [];
 
         if (this.startFrequency < this.endFrequency) {
             for (var frequency = this.startFrequency; frequency < this.endFrequency; frequency++ ) {
-                var wavelength = this.oscillation(frequency);
+                var oscillation = new Oscillation({frequency: frequency,
+                                                   sampleRate: this.sampleRate,
+                                                   bitDepth: this.bitDepth,
+                                                   volume: this.volume,
+                                                   generator: this.generator})
+                var wavelength = oscillation.approximate();
                 oscillations.push(wavelength);
-                wavelength.forEach(function (sample) {samples.push(sample)});
+                wavelength.forEach(function (sample) {combinedoscillations.push(sample)});
             }
         } else {
             for (var frequency = this.startFrequency; frequency > this.endFrequency; frequency-- ) {
-                var wavelength = this.oscillation(frequency);
+                var oscillation = new Oscillation({frequency: frequency,
+                                                   sampleRate: this.sampleRate,
+                                                   bitDepth: this.bitDepth,
+                                                   volume: this.volume,
+                                                   generator: this.generator})
+                var wavelength = oscillation.approximate();
                 oscillations.push(wavelength);
-                wavelength.forEach(function (sample) {samples.push(sample)});
+                wavelength.forEach(function (sample) {combinedoscillations.push(sample)});
             }
         }
-        var count = Math.ceil(this.targetSampleCount/samples.length)
-
+        var count = Math.ceil(samples/combinedoscillations.length)
+        
         var timedSamples = [];
         oscillations.forEach(function (oscillation) {
             var counter = 0;
@@ -272,20 +326,6 @@ class LinearBend {
         
         return sizedArray(timedSamples, this.bitDepth)
     }
-
-    /**
-     * Generate a single oscillation at the desired sample rate, bit depth and frequency
-     */
-    oscillation(frequency) {
-        var approxOscillationLength = Math.floor(this.sampleRate / frequency);
-        var volume = this.volume;
-        var indices = [];
-        for (var index = 0; indices.length < approxOscillationLength; index ++) {
-            indices.push(index);
-        }
-        return indices.map(index => Math.round(this.generator(index, approxOscillationLength, volume)));
-    }
-
 }
 
 /**
@@ -293,26 +333,30 @@ class LinearBend {
  */
 class Silence {
     constructor ({sampleRate = 16000,
-                  bitDepth = 16,
-                  duration = 200} = {}) {
+                  bitDepth = 16} = {}) {
         this.sampleRate = sampleRate;
         this.bitDepth = bitDepth;
-        this.duration = duration;
     }
 
     /**
-     * We keep offset for consistency of API, but it does nothing.
+     * Return an array of 0's to fit the samplerate, bit depth and size.
      */
-    tone (offset = 0) {
-        var targetSampleCount = Math.floor(this.duration / 1000 * this.sampleRate);
+    accurate ({duration = undefined,
+              samples = undefined} = {}) {
+
+        if (samples && duration) {
+            throw "Only one size variable may be set.";
+        } else if (duration) {
+            samples = (duration * this.sampleRate) / 1000;
+        }                
+        samples = Math.floor(samples); 
+
+        var targetSampleCount = Math.floor(samples);
         return sizedArray(targetSampleCount,this.bitDepth);
     }
 
-    approxTone = this.tone;
-    preciseTone = this.tone;
-
     toString () {
-        return `A waveform containing ${this.duration}ms of silence at ${this.bitDepth}/${this.sampleRate/1000}KHz`;
+        return `A waveform containing silence at ${this.bitDepth}/${this.sampleRate/1000}KHz`;
     }
 }
 
